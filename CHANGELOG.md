@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.0.1
+## 0.1.0
 
 - Initial release
 - Domain → port HTTPS reverse proxy powered by mkcert
