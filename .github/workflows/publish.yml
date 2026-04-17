@@ -48,7 +48,7 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run package
+      - run: mkdir -p dist && npm run package
 
       - name: Publish to VS Code Marketplace
         run: npx vsce publish
