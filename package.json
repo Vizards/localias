@@ -1,0 +1,367 @@
+{
+  "name": "localias",
+  "displayName": "Localias",
+  "description": "Use https://any.domain.you.want for local dev servers. Auto HTTPS certificates, hosts management, HTTP/2, WebSocket — zero config.",
+  "version": "0.0.1",
+  "publisher": "Vizards",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Vizards/localias"
+  },
+  "icon": "resources/icon.png",
+  "engines": {
+    "vscode": "^1.116.0"
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "categories": [
+    "Other",
+    "Testing",
+    "Debuggers"
+  ],
+  "keywords": [
+    "https",
+    "localhost",
+    "proxy",
+    "reverse-proxy",
+    "mkcert",
+    "ssl",
+    "local-development",
+    "custom-domain",
+    "certificate",
+    "hosts",
+    "vite",
+    "webpack",
+    "http2",
+    "websocket"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "icons": {
+      "localias-icon": {
+        "description": "Localias icon",
+        "default": {
+          "fontPath": "resources/fonts/localias-icons.woff",
+          "fontCharacter": "\\F101"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "localias.start",
+        "title": "Localias: Start Proxy",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "localias.stop",
+        "title": "Localias: Stop Proxy",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "localias.openSettings",
+        "title": "Localias: Settings"
+      },
+      {
+        "command": "localias.statusBarMenu",
+        "title": "Localias: Status Menu"
+      },
+      {
+        "command": "localias.addRoute",
+        "title": "Localias: Add Route",
+        "icon": "$(add)"
+      },
+      {
+        "command": "localias.removeRoute",
+        "title": "Localias: Remove Route",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "localias.clearAllRoutes",
+        "title": "Localias: Remove All Routes",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "localias.showRoutes",
+        "title": "Localias: Show Routes"
+      },
+      {
+        "command": "localias.generateCert",
+        "title": "Localias: Generate Certificate"
+      },
+      {
+        "command": "localias.addRouteForPort",
+        "title": "Add Route for Port",
+        "icon": "$(add)"
+      },
+      {
+        "command": "localias.refreshPorts",
+        "title": "Refresh Ports",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "localias.editRoute",
+        "title": "Edit Route",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "localias.toggleRoute",
+        "title": "Toggle Route",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "localias.enableRoute",
+        "title": "Enable Route",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "localias.disableRoute",
+        "title": "Disable Route",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "localias.syncHosts",
+        "title": "Localias: Sync Hosts File"
+      },
+      {
+        "command": "localias.killPort",
+        "title": "Kill Process",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "localias.hideProcess",
+        "title": "Hide Process from Ports",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "localias.openRoute",
+        "title": "Open in Browser",
+        "icon": "$(globe)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "localias",
+          "title": "Localias",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "localias": [
+        {
+          "id": "localias.routes",
+          "name": "Routes"
+        },
+        {
+          "id": "localias.ports",
+          "name": "Unrouted Ports"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "localias.start",
+          "when": "view == localias.routes && !localias:isRunning",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localias.stop",
+          "when": "view == localias.routes && localias:isRunning",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localias.addRoute",
+          "when": "view == localias.routes",
+          "group": "navigation@2"
+        },
+        {
+          "command": "localias.clearAllRoutes",
+          "when": "view == localias.routes",
+          "group": "navigation@3"
+        },
+        {
+          "command": "localias.refreshPorts",
+          "when": "view == localias.ports",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "localias.openRoute",
+          "when": "view == localias.routes && viewItem == route-enabled && localias:isRunning",
+          "group": "inline@1"
+        },
+        {
+          "command": "localias.enableRoute",
+          "when": "view == localias.routes && viewItem == route-disabled",
+          "group": "inline@2"
+        },
+        {
+          "command": "localias.disableRoute",
+          "when": "view == localias.routes && viewItem =~ /^route-enabled/",
+          "group": "inline@2"
+        },
+        {
+          "command": "localias.editRoute",
+          "when": "view == localias.routes && viewItem =~ /^route-/",
+          "group": "inline@3"
+        },
+        {
+          "command": "localias.removeRoute",
+          "when": "view == localias.routes && viewItem =~ /^route-/",
+          "group": "inline@4"
+        },
+        {
+          "command": "localias.addRouteForPort",
+          "when": "view == localias.ports && viewItem == unmapped",
+          "group": "inline@1"
+        },
+        {
+          "command": "localias.killPort",
+          "when": "view == localias.ports && viewItem == unmapped",
+          "group": "kill"
+        },
+        {
+          "command": "localias.hideProcess",
+          "when": "view == localias.ports && viewItem == unmapped",
+          "group": "hide"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Localias",
+      "properties": {
+        "localias.routes": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique identifier (auto-generated)"
+              },
+              "domain": {
+                "type": "string",
+                "description": "Domain name (e.g., dev.example.com)"
+              },
+              "target": {
+                "type": "number",
+                "description": "Target port number (e.g., 3000)"
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "Whether this route is active"
+              }
+            },
+            "required": [
+              "domain",
+              "target"
+            ]
+          },
+          "description": "Domain → port routing rules"
+        },
+        "localias.listenPort": {
+          "type": "number",
+          "default": 443,
+          "description": "Port the HTTPS proxy listens on"
+        },
+        "localias.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically start the proxy when VS Code opens"
+        },
+        "localias.certDir": {
+          "type": "string",
+          "default": "",
+          "description": "Custom directory for mkcert certificates (defaults to ~/.localias/certs)"
+        },
+        "localias.mkcertPath": {
+          "type": "string",
+          "default": "mkcert",
+          "description": "Path to mkcert binary"
+        },
+        "localias.manageHosts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically manage /etc/hosts entries for route domains"
+        },
+        "localias.loopbackDomains": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "markdownDescription": "Domain suffixes whose DNS already resolves to `127.0.0.1`. Routes using these domains will skip `/etc/hosts` management entirely.\n\nCommon examples: `localtest.me`, `localhost.direct`.\n\n⚠️ Proxy tools (Surge, ClashX, etc.) with Fake IP mode will intercept DNS for these domains. If you use a proxy, either stick with `/etc/hosts` management or add these domains to your proxy's `always-real-ip` list."
+        },
+        "localias.hostsWriteMode": {
+          "type": "string",
+          "enum": [
+            "sudo-prompt",
+            "chmod"
+          ],
+          "default": "sudo-prompt",
+          "markdownDescription": "How to gain write access to the hosts file. Only applies when `#localias.manageHosts#` is enabled.\n\n- **sudo-prompt**: Prompts for authorization on each write (secure, cross-platform).\n- **chmod**: One-time `chmod 666` to make the hosts file world-writable (macOS/Linux only, no further prompts). On Windows this setting is ignored — `sudo-prompt` is always used.",
+          "enumDescriptions": [
+            "Show a native OS auth dialog on each write (Touch ID / UAC / PolicyKit)",
+            "One-time chmod 666 on the hosts file — no further prompts (macOS/Linux only)"
+          ]
+        },
+        "localias.portBlacklist": {
+          "type": "array",
+          "default": [
+            "ControlCenter",
+            "rapportd",
+            "Code Helper (Plugin)",
+            "Figma",
+            "figma_agent",
+            "WeChat",
+            "Raycast",
+            "Surge",
+            "Spotify"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "markdownDescription": "Process names to hide from the Unrouted Ports panel. Remove entries to show them again."
+        },
+        "localias.tlds": {
+          "type": "array",
+          "default": [
+            "localhost"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "markdownDescription": "Top-level domains offered as candidates when typing a domain name. When you type a bare name (e.g. `myapp`), the picker suggests `myapp.localhost`, `myapp.test`, etc. based on this list."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package -o dist/",
+    "publish": "vsce publish",
+    "login": "vsce login Vizards",
+    "generate-fonts": "npx fantasticon resources/font-icons -o resources/fonts --font-types woff --asset-types json --name localias-icons --font-height 1024 --normalize"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/vscode": "^1.116.0",
+    "@vscode/vsce": "^3.9.0",
+    "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "@vscode/sudo-prompt": "^9.3.2"
+  }
+}

@@ -1,0 +1,14 @@
+.vscode/**
+src/**
+out/**/*.map
+tsconfig.json
+.github/**
+.gitignore
+*.vsix
+.vscode-test/
+.dev/**
+dist/**
+package-lock.json
+.DS_Store
+resources/font-icons/**
+resources/fonts/localias-icons.json
