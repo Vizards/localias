@@ -350,7 +350,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package -o dist/",
+    "package": "mkdir -p dist && vsce package -o dist/",
     "publish": "vsce publish",
     "login": "vsce login Vizards",
     "generate-fonts": "npx fantasticon resources/font-icons -o resources/fonts --font-types woff --asset-types json --name localias-icons --font-height 1024 --normalize"
