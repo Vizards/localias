@@ -9,9 +9,17 @@ let portPidMap = new Map<number, Set<number>>();
 let portProcessMap = new Map<number, string>();
 
 function getBlacklist(): Set<string> {
-  return new Set(
+  const list = new Set(
     vscode.workspace.getConfiguration('localias').get<string[]>('portBlacklist') ?? [],
   );
+  // In remote environments (Codespaces, SSH, etc.) forwarded ports appear
+  // under "Code Helper (Plugin)". Keep them visible so they show up in the
+  // Unrouted Ports panel.  Once the stable `workspace.tunnels` API lands
+  // this workaround can be removed.
+  if (vscode.env.remoteName) {
+    list.delete('Code Helper (Plugin)');
+  }
+  return list;
 }
 
 /**
