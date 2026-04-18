@@ -8,8 +8,14 @@ import type { Deps } from './deps';
 let restartTimer: ReturnType<typeof setTimeout> | undefined;
 
 export async function cmdStart(deps: Deps) {
-  if (deps.proxy.current?.isRunning) {
-    vscode.window.showInformationMessage('Localias is already running.');
+  // Check if proxy is already running (by us or another window)
+  const state = deps.serverState.getState();
+  if (state.running) {
+    if (state.ownedByThisWindow && deps.proxy.current?.isRunning) {
+      vscode.window.showInformationMessage('Localias is already running.');
+    } else if (!state.ownedByThisWindow) {
+      vscode.window.showInformationMessage('Localias is already running in another VS Code window.');
+    }
     return;
   }
 
@@ -25,13 +31,19 @@ export async function cmdStart(deps: Deps) {
     vscode.window.showWarningMessage(`Auto-disabled ${conflictIds.length} conflicting route(s) with duplicate domains.`);
   }
 
+  // Claim ownership BEFORE binding port to prevent races
+  const listenPort = vscode.workspace.getConfiguration('localias').get<number>('listenPort') ?? 443;
+  if (!deps.serverState.claimOwnership(listenPort)) {
+    vscode.window.showInformationMessage('Localias is already running in another VS Code window.');
+    return;
+  }
+
   try {
     const certDomains = enabledRoutes.length > 0
       ? enabledRoutes.map(r => r.domain)
       : ['localhost'];
     await deps.certManager.ensurePreflight();
     const certs = await deps.certManager.ensureCerts(certDomains);
-    const listenPort = vscode.workspace.getConfiguration('localias').get<number>('listenPort') ?? 443;
 
     deps.proxy.current = new ProxyServer(
       certs, enabledRoutes, getRoutes(), listenPort,
@@ -44,8 +56,17 @@ export async function cmdStart(deps: Deps) {
     deps.routesTree.setRunning(true);
     vscode.commands.executeCommand('setContext', 'localias:isRunning', true);
   } catch (err: unknown) {
+    deps.serverState.releaseOwnership();
+
     if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
-      const listenPort = vscode.workspace.getConfiguration('localias').get<number>('listenPort') ?? 443;
+      // Re-check shared state — another Localias window may have started
+      // between our ownership claim and port bind
+      const currentState = deps.serverState.getState();
+      if (currentState.running) {
+        vscode.window.showInformationMessage('Localias is already running in another VS Code window.');
+        return;
+      }
+
       const choice = await vscode.window.showErrorMessage(
         `Port ${listenPort} is already in use.`,
         'Kill & Retry',
@@ -65,13 +86,31 @@ export async function cmdStart(deps: Deps) {
 }
 
 export async function cmdStop(deps: Deps) {
-  if (!deps.proxy.current?.isRunning) {
+  const state = deps.serverState.getState();
+
+  if (!state.running) {
     vscode.window.showInformationMessage('Localias is not running.');
     return;
   }
 
-  deps.proxy.current.stop();
-  deps.proxy.current = undefined;
+  if (state.ownedByThisWindow) {
+    deps.proxy.current?.stop();
+    deps.proxy.current = undefined;
+    deps.serverState.releaseOwnership();
+  } else {
+    // Another window owns the proxy — request it to stop
+    deps.serverState.requestRemoteStop();
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    const newState = deps.serverState.getState();
+    if (newState.running) {
+      vscode.window.showWarningMessage(
+        'The proxy is running in another VS Code window that did not respond. Please stop it from that window.',
+      );
+      return;
+    }
+  }
+
   deps.statusBar.setStopped();
   deps.routesTree.setRunning(false);
   vscode.commands.executeCommand('setContext', 'localias:isRunning', false);
@@ -115,6 +154,9 @@ export function autoRestart(deps: Deps) {
           (routeId) => { enableRouteResolvingConflicts(routeId); },
         );
         await deps.proxy.current.start();
+
+        // Update lock with potentially new port
+        deps.serverState.claimOwnership(listenPort);
       } else {
         // Hot-update: just swap the route lists, connections stay alive
         proxy.updateRoutes(enabledRoutes, getRoutes());
@@ -125,6 +167,7 @@ export function autoRestart(deps: Deps) {
       deps.statusBar.setStopped();
       deps.routesTree.setRunning(false);
       vscode.commands.executeCommand('setContext', 'localias:isRunning', false);
+      deps.serverState.releaseOwnership();
       vscode.window.showErrorMessage(`Failed to restart Localias: ${errMsg(err)}`);
     }
   }, 500);

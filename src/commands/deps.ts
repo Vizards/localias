@@ -4,6 +4,7 @@ import type { StatusBarManager } from '../status-bar';
 import type { RoutesTreeProvider, ForwardedPortsTreeProvider } from '../views';
 import type { PortForwardingWatcher } from '../port';
 import type { HostsManager } from '../hosts';
+import type { ServerStateManager } from '../server-state';
 
 export interface Deps {
   proxy: { current: ProxyServer | undefined };
@@ -13,4 +14,5 @@ export interface Deps {
   portsTree: ForwardedPortsTreeProvider;
   portWatcher: PortForwardingWatcher;
   hostsManager: HostsManager;
+  serverState: ServerStateManager;
 }
