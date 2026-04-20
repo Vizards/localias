@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+### Bug Fixes
+
+- Keep forwarded remote ports visible in Codespaces / SSH environments by automatically removing `Code Helper (Plugin)` from the default port blacklist when connected to a remote workspace
+- Respect user-explicit `portBlacklist` settings — only override the default value, not user/workspace-level configuration
+- Sync `package-lock.json` version with `package.json`
+
 ## 0.1.0
 
 - Initial release

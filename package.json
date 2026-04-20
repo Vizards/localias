@@ -2,7 +2,7 @@
   "name": "localias",
   "displayName": "Localias",
   "description": "Use https://any.domain.you.want for local dev servers. Auto HTTPS certificates, hosts management, HTTP/2, WebSocket — zero config.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "Vizards",
   "license": "MIT",
   "repository": {
