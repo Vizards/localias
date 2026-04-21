@@ -4,8 +4,32 @@ import { getEnabledRoutes, getRoutes, updateRoute, enableRouteResolvingConflicts
 import { findConflictRouteIds } from './validate';
 import { errMsg } from '../constants';
 import type { Deps } from './deps';
+import type { ServerStateManager } from '../server-state';
 
 let restartTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Wait for the shared server state to report `running=false`, resolving as
+ * soon as an `onDidChangeState` event arrives. Falls back to a timeout so the
+ * caller can warn the user when the owning window is unresponsive.
+ */
+function waitForRunningFalse(serverState: ServerStateManager, timeoutMs: number): Promise<boolean> {
+  if (!serverState.getState().running) return Promise.resolve(true);
+
+  return new Promise(resolve => {
+    const disposable = serverState.onDidChangeState(state => {
+      if (!state.running) {
+        disposable.dispose();
+        clearTimeout(timer);
+        resolve(true);
+      }
+    });
+    const timer = setTimeout(() => {
+      disposable.dispose();
+      resolve(!serverState.getState().running);
+    }, timeoutMs);
+  });
+}
 
 export async function cmdStart(deps: Deps) {
   // Check if proxy is already running (by us or another window)
@@ -98,12 +122,14 @@ export async function cmdStop(deps: Deps) {
     deps.proxy.current = undefined;
     deps.serverState.releaseOwnership();
   } else {
-    // Another window owns the proxy — request it to stop
+    // Another window owns the proxy — request it to stop, then wait for the
+    // shared state to transition to running=false. The owner's stop-signal
+    // poll runs every 5s (fs.watch is a best-effort fast path), so the wait
+    // must be > 5s; 7s leaves a small buffer on top of the poll interval.
     deps.serverState.requestRemoteStop();
-    await new Promise(resolve => setTimeout(resolve, 2000));
 
-    const newState = deps.serverState.getState();
-    if (newState.running) {
+    const stopped = await waitForRunningFalse(deps.serverState, 7000);
+    if (!stopped) {
       vscode.window.showWarningMessage(
         'The proxy is running in another VS Code window that did not respond. Please stop it from that window.',
       );
@@ -155,8 +181,19 @@ export function autoRestart(deps: Deps) {
         );
         await deps.proxy.current.start();
 
-        // Update lock with potentially new port
-        deps.serverState.claimOwnership(listenPort);
+        // Update lock with potentially new port. In the normal path this hits
+        // the "already own it" branch of claimOwnership and always succeeds.
+        // Claim can legitimately fail only if our heartbeat went stale (>30s)
+        // and another window took over in the meantime — in that case we must
+        // not keep a running proxy without the shared lock, or cross-window
+        // state will desync.
+        if (!deps.serverState.claimOwnership(listenPort)) {
+          deps.proxy.current.stop();
+          deps.proxy.current = undefined;
+          throw new Error(
+            `Unable to claim Localias ownership for port ${listenPort}. Another VS Code window took over.`,
+          );
+        }
       } else {
         // Hot-update: just swap the route lists, connections stay alive
         proxy.updateRoutes(enabledRoutes, getRoutes());
