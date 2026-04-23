@@ -7,7 +7,8 @@ import { getRoutes, getEnabledRoutes, updateRoute, enableRouteResolvingConflicts
 import { HostsManager } from './hosts';
 import { registerAll, autoRestart, injectNodeExtraCACerts, type Deps } from './commands';
 import { errMsg } from './constants';
-import { cmdStart } from './commands/proxy';
+import { cmdStart, cmdStop } from './commands/proxy';
+import { ServerStateManager } from './server-state';
 
 let deps: Deps | undefined;
 
@@ -19,6 +20,7 @@ export function activate(context: vscode.ExtensionContext) {
   const portsTree = new ForwardedPortsTreeProvider();
   const portWatcher = new PortForwardingWatcher();
   const hostsManager = new HostsManager(context);
+  const serverState = new ServerStateManager();
 
   deps = {
     proxy: { current: undefined },
@@ -28,6 +30,7 @@ export function activate(context: vscode.ExtensionContext) {
     portsTree,
     portWatcher,
     hostsManager,
+    serverState,
   };
 
   // Register tree views
@@ -91,6 +94,31 @@ export function activate(context: vscode.ExtensionContext) {
   });
   portWatcher.startWatching();
 
+  // ── Cross-window state synchronization ──
+
+  serverState.onDidChangeState((state) => {
+    if (state.running) {
+      const remote = !state.ownedByThisWindow;
+      statusBar.setRunning(getEnabledRoutes().length, remote);
+      routesTree.setRunning(true);
+      vscode.commands.executeCommand('setContext', 'localias:isRunning', true);
+    } else {
+      // If we had a proxy running that was stopped externally, clean up
+      if (deps?.proxy.current?.isRunning) {
+        deps.proxy.current.stop();
+        deps.proxy.current = undefined;
+      }
+      statusBar.setStopped();
+      routesTree.setRunning(false);
+      vscode.commands.executeCommand('setContext', 'localias:isRunning', false);
+    }
+  });
+
+  // Handle stop requests from other windows
+  serverState.onStopRequested(() => {
+    if (deps) cmdStop(deps);
+  });
+
   // Watch config changes to refresh views & auto-restart proxy
   vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration('localias.routes')) {
@@ -136,6 +164,7 @@ export function activate(context: vscode.ExtensionContext) {
     portsView,
     statusBar,
     portWatcher,
+    serverState,
   );
 
   // Sync hosts on activate — consistency check (reads first, skips if already in sync)
@@ -145,16 +174,26 @@ export function activate(context: vscode.ExtensionContext) {
   // Node.js / curl / etc. trust the mkcert CA automatically.
   injectNodeExtraCACerts(context, certManager);
 
-  vscode.commands.executeCommand('setContext', 'localias:isRunning', false);
+  // Check for existing running instance before deciding initial state
+  const initialState = serverState.getState();
+  if (initialState.running) {
+    const remote = !initialState.ownedByThisWindow;
+    statusBar.setRunning(getEnabledRoutes().length, remote);
+    routesTree.setRunning(true);
+    vscode.commands.executeCommand('setContext', 'localias:isRunning', true);
+  } else {
+    vscode.commands.executeCommand('setContext', 'localias:isRunning', false);
 
-  const config = vscode.workspace.getConfiguration('localias');
-  if (config.get<boolean>('autoStart')) {
-    cmdStart(deps);
+    const config = vscode.workspace.getConfiguration('localias');
+    if (config.get<boolean>('autoStart')) {
+      cmdStart(deps);
+    }
   }
 }
 
 export function deactivate() {
   deps?.proxy.current?.stop();
+  deps?.serverState?.releaseOwnership();
   deps?.hostsManager?.cleanupQuietly();
 }
 

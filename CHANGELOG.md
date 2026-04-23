@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0
+
+### Features
+
+- **Cross-window server state synchronization** — the proxy is a single system-wide process, but each VS Code window used to track its state independently, leading to inconsistent UI (status bar, tree view, context keys) across windows. Windows now share state via a lock file at `~/.localias/server.lock` with PID and heartbeat validation:
+  - Start/stop from any window is reflected in all other windows
+  - Stopping from a non-owning window sends a remote stop signal to the window that actually runs the proxy
+  - Stale locks (dead PID or missed heartbeat) are automatically reclaimed
+  - `autoStart` is skipped when another window already runs the proxy
+
 ## 0.1.1
 
 ### Bug Fixes

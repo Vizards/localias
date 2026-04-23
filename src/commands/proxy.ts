@@ -4,12 +4,42 @@ import { getEnabledRoutes, getRoutes, updateRoute, enableRouteResolvingConflicts
 import { findConflictRouteIds } from './validate';
 import { errMsg } from '../constants';
 import type { Deps } from './deps';
+import type { ServerStateManager } from '../server-state';
 
 let restartTimer: ReturnType<typeof setTimeout> | undefined;
 
+/**
+ * Wait for the shared server state to report `running=false`, resolving as
+ * soon as an `onDidChangeState` event arrives. Falls back to a timeout so the
+ * caller can warn the user when the owning window is unresponsive.
+ */
+function waitForRunningFalse(serverState: ServerStateManager, timeoutMs: number): Promise<boolean> {
+  if (!serverState.getState().running) return Promise.resolve(true);
+
+  return new Promise(resolve => {
+    const disposable = serverState.onDidChangeState(state => {
+      if (!state.running) {
+        disposable.dispose();
+        clearTimeout(timer);
+        resolve(true);
+      }
+    });
+    const timer = setTimeout(() => {
+      disposable.dispose();
+      resolve(!serverState.getState().running);
+    }, timeoutMs);
+  });
+}
+
 export async function cmdStart(deps: Deps) {
-  if (deps.proxy.current?.isRunning) {
-    vscode.window.showInformationMessage('Localias is already running.');
+  // Check if proxy is already running (by us or another window)
+  const state = deps.serverState.getState();
+  if (state.running) {
+    if (state.ownedByThisWindow && deps.proxy.current?.isRunning) {
+      vscode.window.showInformationMessage('Localias is already running.');
+    } else if (!state.ownedByThisWindow) {
+      vscode.window.showInformationMessage('Localias is already running in another VS Code window.');
+    }
     return;
   }
 
@@ -25,13 +55,19 @@ export async function cmdStart(deps: Deps) {
     vscode.window.showWarningMessage(`Auto-disabled ${conflictIds.length} conflicting route(s) with duplicate domains.`);
   }
 
+  // Claim ownership BEFORE binding port to prevent races
+  const listenPort = vscode.workspace.getConfiguration('localias').get<number>('listenPort') ?? 443;
+  if (!deps.serverState.claimOwnership(listenPort)) {
+    vscode.window.showInformationMessage('Localias is already running in another VS Code window.');
+    return;
+  }
+
   try {
     const certDomains = enabledRoutes.length > 0
       ? enabledRoutes.map(r => r.domain)
       : ['localhost'];
     await deps.certManager.ensurePreflight();
     const certs = await deps.certManager.ensureCerts(certDomains);
-    const listenPort = vscode.workspace.getConfiguration('localias').get<number>('listenPort') ?? 443;
 
     deps.proxy.current = new ProxyServer(
       certs, enabledRoutes, getRoutes(), listenPort,
@@ -44,8 +80,17 @@ export async function cmdStart(deps: Deps) {
     deps.routesTree.setRunning(true);
     vscode.commands.executeCommand('setContext', 'localias:isRunning', true);
   } catch (err: unknown) {
+    deps.serverState.releaseOwnership();
+
     if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
-      const listenPort = vscode.workspace.getConfiguration('localias').get<number>('listenPort') ?? 443;
+      // Re-check shared state — another Localias window may have started
+      // between our ownership claim and port bind
+      const currentState = deps.serverState.getState();
+      if (currentState.running) {
+        vscode.window.showInformationMessage('Localias is already running in another VS Code window.');
+        return;
+      }
+
       const choice = await vscode.window.showErrorMessage(
         `Port ${listenPort} is already in use.`,
         'Kill & Retry',
@@ -65,13 +110,33 @@ export async function cmdStart(deps: Deps) {
 }
 
 export async function cmdStop(deps: Deps) {
-  if (!deps.proxy.current?.isRunning) {
+  const state = deps.serverState.getState();
+
+  if (!state.running) {
     vscode.window.showInformationMessage('Localias is not running.');
     return;
   }
 
-  deps.proxy.current.stop();
-  deps.proxy.current = undefined;
+  if (state.ownedByThisWindow) {
+    deps.proxy.current?.stop();
+    deps.proxy.current = undefined;
+    deps.serverState.releaseOwnership();
+  } else {
+    // Another window owns the proxy — request it to stop, then wait for the
+    // shared state to transition to running=false. The owner's stop-signal
+    // poll runs every 5s (fs.watch is a best-effort fast path), so the wait
+    // must be > 5s; 7s leaves a small buffer on top of the poll interval.
+    deps.serverState.requestRemoteStop();
+
+    const stopped = await waitForRunningFalse(deps.serverState, 7000);
+    if (!stopped) {
+      vscode.window.showWarningMessage(
+        'The proxy is running in another VS Code window that did not respond. Please stop it from that window.',
+      );
+      return;
+    }
+  }
+
   deps.statusBar.setStopped();
   deps.routesTree.setRunning(false);
   vscode.commands.executeCommand('setContext', 'localias:isRunning', false);
@@ -115,6 +180,20 @@ export function autoRestart(deps: Deps) {
           (routeId) => { enableRouteResolvingConflicts(routeId); },
         );
         await deps.proxy.current.start();
+
+        // Update lock with potentially new port. In the normal path this hits
+        // the "already own it" branch of claimOwnership and always succeeds.
+        // Claim can legitimately fail only if our heartbeat went stale (>30s)
+        // and another window took over in the meantime — in that case we must
+        // not keep a running proxy without the shared lock, or cross-window
+        // state will desync.
+        if (!deps.serverState.claimOwnership(listenPort)) {
+          deps.proxy.current.stop();
+          deps.proxy.current = undefined;
+          throw new Error(
+            `Unable to claim Localias ownership for port ${listenPort}. Another VS Code window took over.`,
+          );
+        }
       } else {
         // Hot-update: just swap the route lists, connections stay alive
         proxy.updateRoutes(enabledRoutes, getRoutes());
@@ -125,6 +204,7 @@ export function autoRestart(deps: Deps) {
       deps.statusBar.setStopped();
       deps.routesTree.setRunning(false);
       vscode.commands.executeCommand('setContext', 'localias:isRunning', false);
+      deps.serverState.releaseOwnership();
       vscode.window.showErrorMessage(`Failed to restart Localias: ${errMsg(err)}`);
     }
   }, 500);

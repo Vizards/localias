@@ -15,7 +15,7 @@ export class StatusBarManager implements vscode.Disposable {
     return this.running;
   }
 
-  setRunning(routeCount: number): void {
+  setRunning(routeCount: number, remote = false): void {
     this.running = true;
     this.routeCount = routeCount;
     this.item.text = `$(localias-icon) Localias`;
@@ -25,7 +25,9 @@ export class StatusBarManager implements vscode.Disposable {
 
     const md = new vscode.MarkdownString(undefined, true);
     md.isTrusted = true;
-    md.appendMarkdown(`**Localias** &mdash; Running\n\n`);
+    md.appendMarkdown(remote
+      ? `**Localias** &mdash; Running (another window)\n\n`
+      : `**Localias** &mdash; Running\n\n`);
     md.appendMarkdown(routeCount > 0
       ? `$(pass) ${routeCount} route(s) active\n\n`
       : `$(info) No routes configured\n\n`);
