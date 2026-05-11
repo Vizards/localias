@@ -3,6 +3,23 @@ name: Publish
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish_vscode_marketplace:
+        description: Publish this version to the VS Code Marketplace
+        required: false
+        type: boolean
+        default: false
+      publish_open_vsx:
+        description: Publish this version to Open VSX
+        required: false
+        type: boolean
+        default: true
+      create_github_release:
+        description: Create the GitHub Release for this version
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   check-version:
@@ -17,12 +34,18 @@ jobs:
 
       - name: Check version change
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           CURRENT=$(node -p "require('./package.json').version")
           PREVIOUS=$(git show HEAD~1:package.json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || echo "")
           echo "current=$CURRENT"
           echo "previous=$PREVIOUS"
-          if [ "$CURRENT" != "$PREVIOUS" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+            echo "Manual publish requested for $CURRENT"
+          elif [ "$CURRENT" != "$PREVIOUS" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
             echo "🚀 Version changed: $PREVIOUS → $CURRENT"
@@ -50,15 +73,33 @@ jobs:
 
       - run: mkdir -p dist && npm run package
 
+      - name: Find packaged extension
+        id: package
+        run: |
+          VSIX_PATH=$(find dist -maxdepth 1 -name '*.vsix' -print -quit)
+          if [ -z "$VSIX_PATH" ]; then
+            echo "No .vsix package was created in dist/"
+            exit 1
+          fi
+          echo "vsix=$VSIX_PATH" >> "$GITHUB_OUTPUT"
+
       - name: Publish to VS Code Marketplace
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_vscode_marketplace
         run: npx vsce publish
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
+      - name: Publish to Open VSX
+        if: github.event_name == 'push' || inputs.publish_open_vsx
+        run: npx --yes ovsx publish "${{ steps.package.outputs.vsix }}"
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
       - name: Create GitHub Release
+        if: github.event_name == 'push' || inputs.create_github_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.check-version.outputs.version }}
           name: v${{ needs.check-version.outputs.version }}
           generate_release_notes: true
-          files: dist/*.vsix
+          files: ${{ steps.package.outputs.vsix }}
