@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/Vizards/localias/compare/v0.2.1...v0.2.2) (2026-10-15)
+
+
+### ci
+
+* mirror DeepSeek release and rescue publishing ([#5](https://github.com/Vizards/localias/issues/5)) ([9c70408](https://github.com/Vizards/localias/commit/9c70408dc50f843c1a7cdc1d7a349ef839f406d0))
+
 ## 0.2.1
 
 ### Maintenance
