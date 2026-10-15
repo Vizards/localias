@@ -35,7 +35,7 @@ jobs:
       changed: ${{ steps.version.outputs.changed }}
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@v4.4.0
         with:
           fetch-depth: 2
           persist-credentials: false
@@ -50,17 +50,11 @@ jobs:
           PREVIOUS=$(git show HEAD~1:package.json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || echo "")
           echo "current=$CURRENT"
           echo "previous=$PREVIOUS"
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$CURRENT" != "$PREVIOUS" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
-            echo "Manual publish requested for $CURRENT"
-          elif [ "$CURRENT" != "$PREVIOUS" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
-            echo "🚀 Version changed: $PREVIOUS → $CURRENT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "⏭️ Version unchanged ($CURRENT), skipping publish"
           fi
 
   publish:
@@ -75,14 +69,12 @@ jobs:
     env:
       RELEASE_VERSION: ${{ needs.check-version.outputs.version }}
       VSIX_PATH: dist/localias-${{ needs.check-version.outputs.version }}.vsix
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@v4.4.0
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: 24
           cache: npm
@@ -94,34 +86,22 @@ jobs:
           node -e 'const p = require("./package.json"); require("node:assert/strict").deepEqual([p.publisher, p.name, p.version], ["Vizards", "localias", process.env.RELEASE_VERSION]);'
           mkdir -p dist
           ./node_modules/.bin/vsce package --out "$VSIX_PATH"
-          (cd dist && sha256sum "$(basename "$VSIX_PATH")" > SHA256SUMS)
 
       - name: Save the exact VSIX for recovery
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: localias-release-${{ env.RELEASE_VERSION }}-${{ github.run_attempt }}
-          path: |
-            ${{ env.VSIX_PATH }}
-            dist/SHA256SUMS
+          path: ${{ env.VSIX_PATH }}
           if-no-files-found: error
           retention-days: 30
 
       - name: Sign in with Entra workload identity federation
-        if: github.event_name == 'push' || inputs.publish_vscode_marketplace || (!inputs.publish_open_vsx && !inputs.create_github_release)
-        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        if: github.event_name == 'push' || inputs.publish_vscode_marketplace
+        uses: azure/login@v3.1.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          audience: api://AzureADTokenExchange
           allow-no-subscriptions: true
-
-      # Disable all three dispatch outputs to obtain the ID needed for initial publisher membership.
-      - name: Show Marketplace profile for initial setup
-        if: github.event_name == 'workflow_dispatch' && !inputs.publish_vscode_marketplace && !inputs.publish_open_vsx && !inputs.create_github_release
-        run: >-
-          az rest --url https://app.vssps.visualstudio.com/_apis/profile/profiles/me
-          --resource 499b84ac-1321-427f-aa17-267ca6975798
-          --query '{id:id,displayName:displayName}' --output json
 
       - name: Publish to VS Code Marketplace
         if: github.event_name == 'push' || inputs.publish_vscode_marketplace
@@ -135,7 +115,7 @@ jobs:
 
       - name: Create GitHub Release
         if: github.event_name == 'push' || inputs.create_github_release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@v2.6.2
         with:
           tag_name: v${{ needs.check-version.outputs.version }}
           name: v${{ needs.check-version.outputs.version }}
@@ -143,6 +123,4 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           overwrite_files: false
-          files: |
-            ${{ env.VSIX_PATH }}
-            dist/SHA256SUMS
+          files: ${{ env.VSIX_PATH }}
