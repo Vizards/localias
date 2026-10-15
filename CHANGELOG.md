@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/Vizards/localias/compare/v0.2.2...v0.2.3) (2026-10-15)
+
+
+### ci
+
+* exercise tag rescue publishing ([b05ebaf](https://github.com/Vizards/localias/commit/b05ebaf4cfc322396c69ea00e45eb43a911e58c0))
+
 ## [0.2.2](https://github.com/Vizards/localias/compare/v0.2.1...v0.2.2) (2026-10-15)
 
 
