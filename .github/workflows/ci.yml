@@ -10,20 +10,18 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: 24
           cache: npm
 
       - run: npm ci --ignore-scripts --no-audit --no-fund
 
-      - run: npm run compile
-
       - run: mkdir -p dist && npm run package
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4.6.2
         with:
           name: localias.vsix
           path: dist/*.vsix
