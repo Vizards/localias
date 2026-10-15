@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+### Maintenance
+
+- Publish through Microsoft Entra workload identity federation and Open VSX Trusted Publishing, using the same VSIX for both registries.
+
 ## 0.2.0
 
 ### Features

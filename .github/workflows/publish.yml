@@ -9,7 +9,7 @@ on:
         description: Publish this version to the VS Code Marketplace
         required: false
         type: boolean
-        default: false
+        default: true
       publish_open_vsx:
         description: Publish this version to Open VSX
         required: false
@@ -19,7 +19,14 @@ on:
         description: Create the GitHub Release for this version
         required: false
         type: boolean
-        default: false
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: localias-publish
+  cancel-in-progress: false
 
 jobs:
   check-version:
@@ -28,9 +35,10 @@ jobs:
       changed: ${{ steps.version.outputs.changed }}
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 2
+          persist-credentials: false
 
       - name: Check version change
         id: version
@@ -38,6 +46,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           CURRENT=$(node -p "require('./package.json').version")
+          [[ "$CURRENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected a stable release version'; exit 1; }
           PREVIOUS=$(git show HEAD~1:package.json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || echo "")
           echo "current=$CURRENT"
           echo "previous=$PREVIOUS"
@@ -56,50 +65,84 @@ jobs:
 
   publish:
     needs: check-version
-    if: needs.check-version.outputs.changed == 'true'
+    if: github.ref == 'refs/heads/main' && needs.check-version.outputs.changed == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: production
     permissions:
       contents: write
+      id-token: write
+    env:
+      RELEASE_VERSION: ${{ needs.check-version.outputs.version }}
+      VSIX_PATH: dist/localias-${{ needs.check-version.outputs.version }}.vsix
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          node-version: 20
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
           cache: npm
 
-      - run: npm ci
+      - run: npm ci --ignore-scripts --no-audit --no-fund
 
-      - run: mkdir -p dist && npm run package
-
-      - name: Find packaged extension
-        id: package
+      - name: Package the release once
         run: |
-          VSIX_PATH=$(find dist -maxdepth 1 -name '*.vsix' -print -quit)
-          if [ -z "$VSIX_PATH" ]; then
-            echo "No .vsix package was created in dist/"
-            exit 1
-          fi
-          echo "vsix=$VSIX_PATH" >> "$GITHUB_OUTPUT"
+          node -e 'const p = require("./package.json"); require("node:assert/strict").deepEqual([p.publisher, p.name, p.version], ["Vizards", "localias", process.env.RELEASE_VERSION]);'
+          mkdir -p dist
+          ./node_modules/.bin/vsce package --out "$VSIX_PATH"
+          (cd dist && sha256sum "$(basename "$VSIX_PATH")" > SHA256SUMS)
+
+      - name: Save the exact VSIX for recovery
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: localias-release-${{ env.RELEASE_VERSION }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.VSIX_PATH }}
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Sign in with Entra workload identity federation
+        if: github.event_name == 'push' || inputs.publish_vscode_marketplace || (!inputs.publish_open_vsx && !inputs.create_github_release)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          audience: api://AzureADTokenExchange
+          allow-no-subscriptions: true
+
+      # Disable all three dispatch outputs to obtain the ID needed for initial publisher membership.
+      - name: Show Marketplace profile for initial setup
+        if: github.event_name == 'workflow_dispatch' && !inputs.publish_vscode_marketplace && !inputs.publish_open_vsx && !inputs.create_github_release
+        run: >-
+          az rest --url https://app.vssps.visualstudio.com/_apis/profile/profiles/me
+          --resource 499b84ac-1321-427f-aa17-267ca6975798
+          --query '{id:id,displayName:displayName}' --output json
 
       - name: Publish to VS Code Marketplace
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_vscode_marketplace
-        run: npx vsce publish
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        if: github.event_name == 'push' || inputs.publish_vscode_marketplace
+        timeout-minutes: 5
+        run: ./node_modules/.bin/vsce publish --azure-credential --packagePath "$VSIX_PATH"
 
       - name: Publish to Open VSX
         if: github.event_name == 'push' || inputs.publish_open_vsx
-        run: npx --yes ovsx publish "${{ steps.package.outputs.vsix }}"
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        timeout-minutes: 5
+        run: ./node_modules/.bin/ovsx publish --trusted-publishing "$VSIX_PATH"
 
       - name: Create GitHub Release
         if: github.event_name == 'push' || inputs.create_github_release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: v${{ needs.check-version.outputs.version }}
           name: v${{ needs.check-version.outputs.version }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
-          files: ${{ steps.package.outputs.vsix }}
+          fail_on_unmatched_files: true
+          overwrite_files: false
+          files: |
+            ${{ env.VSIX_PATH }}
+            dist/SHA256SUMS
